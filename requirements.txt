@@ -8,3 +8,6 @@ langchain-text-splitters
 chromadb
 openai
 pydantic
+transformers
+sentence-transformers
+torch
