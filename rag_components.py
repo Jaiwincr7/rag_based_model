@@ -3,7 +3,6 @@ from transformers import AutoTokenizer, AutoModelForCausalLM, pipeline
 import os
 import torch
 
-os.environ["HF_TOKEN"] = "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"
 
 model_name = "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
 
@@ -47,4 +46,5 @@ def format_docs(docs):
             f"{d.page_content.strip()}"
         )
     return "\n\n".join(formatted)
+
 
