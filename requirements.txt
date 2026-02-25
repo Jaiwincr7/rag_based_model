@@ -1,8 +1,10 @@
 fastapi
 uvicorn
+gunicorn
 langchain
 langchain-community
+langchain-openai
+langchain-text-splitters
 chromadb
 openai
 pydantic
-gunicorn
