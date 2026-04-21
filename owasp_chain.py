@@ -1,7 +1,7 @@
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import RunnablePassthrough
 from langchain_core.output_parsers import StrOutputParser
-from rag_components import format_docs, llm 
+from rag_components import format_docs, get_llm
 from owasp_store import owasp_retriever
 
 # 1. Use ChatPromptTemplate (Better for Chat/Instruct models)
@@ -22,6 +22,7 @@ prompt = ChatPromptTemplate.from_messages([
 
 def owasp_print(query):
     print(f"DEBUG: Asking Chain: {query}")
+    llm = get_llm()
     
     # 2. Build the Chain
     chain = (
