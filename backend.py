@@ -17,7 +17,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
+@app.get("/")
+def root():
+    return {"status": "running"}
+    
 class QueryRequest(BaseModel):
     query: str
 
