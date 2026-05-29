@@ -1,36 +1,65 @@
-from asyncio.windows_events import NULL
+import asyncio
 import os
-import torch
-from owasp_chain import owasp_print
-from nist_chain import nist_print
 
-# =========================
-# BASIC SETUP
-# =========================
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 
-torch.set_num_threads(4)
+REQUEST_TIMEOUT_SEC = int(os.getenv("REQUEST_TIMEOUT_SEC", "90"))
 
+app = FastAPI(title="Security RAG API")
 
-def get_choice():
-    while True:
-        choice_str = input('Select one from this 1) owasp  2) nist  (anything else to quit): ').strip()
-        if not choice_str:
-            # empty input -> quit
-            return None
-        try:
-            choice = int(choice_str)
-            return choice
-        except ValueError:
-            print('Please enter 1, 2, or press Enter/other key to exit.')
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
-a = get_choice()
-while a in (1, 2):
-    question = input('Enter the question related to selected part: ')
-    if a == 1:
-        print(owasp_print(question))
-    elif a == 2:
-        print(nist_print(question))
-    a = get_choice()
+class QueryRequest(BaseModel):
+    query: str
 
-print('Thank you for using the application')
+
+@app.get("/health")
+def health():
+    """Fast health check — Render should use this path, not /askowasp."""
+    return {"status": "ok"}
+
+
+@app.post("/askowasp")
+async def ask_owasp_endpoint(req: QueryRequest):
+    from owasp_chain import owasp_print
+
+    try:
+        answer = await asyncio.wait_for(
+            asyncio.to_thread(owasp_print, req.query),
+            timeout=REQUEST_TIMEOUT_SEC,
+        )
+    except asyncio.TimeoutError:
+        raise HTTPException(
+            status_code=504,
+            detail=(
+                f"OWASP request timed out after {REQUEST_TIMEOUT_SEC}s. "
+                "Cold starts load embeddings + call Hugging Face — retry once."
+            ),
+        )
+    return {"answer": answer}
+
+
+@app.post("/askmitre")
+async def ask_mitre_endpoint(req: QueryRequest):
+    from mitre_chain import router
+
+    try:
+        answer = await asyncio.wait_for(
+            asyncio.to_thread(router.solve, req.query),
+            timeout=REQUEST_TIMEOUT_SEC,
+        )
+    except asyncio.TimeoutError:
+        raise HTTPException(
+            status_code=504,
+            detail=f"MITRE request timed out after {REQUEST_TIMEOUT_SEC}s.",
+        )
+    return {"answer": answer}
