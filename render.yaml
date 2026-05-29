@@ -1,0 +1,24 @@
+services:
+  - type: web
+    name: rag-based-model
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn -k uvicorn.workers.UvicornWorker run:app --bind 0.0.0.0:$PORT --workers 1 --timeout 180
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11.9"
+      - key: HF_TOKEN
+        sync: false
+      - key: USE_REMOTE_LLM
+        value: "true"
+      - key: USE_REMOTE_EMBEDDINGS
+        value: "true"
+      - key: USE_EXTRACTIVE_ONLY
+        value: "false"
+      - key: MODEL_NAME
+        value: TinyLlama/TinyLlama-1.1B-Chat-v1.0
+      - key: EMBEDDING_MODEL
+        value: sentence-transformers/all-MiniLM-L6-v2
+      - key: REQUEST_TIMEOUT_SEC
+        value: "90"
