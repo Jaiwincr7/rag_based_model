@@ -1,15 +1,18 @@
-from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_community.vectorstores import Chroma
+from shared_embeddings import get_embeddings
+
+_retriever = None
 
 
-embeddings = HuggingFaceEmbeddings(
-    model_name="ibm-granite/granite-embedding-107m-multilingual"
-)
+def get_owasp_retriever():
+    global _retriever
+    if _retriever is not None:
+        return _retriever
 
-owasp_store = Chroma(
-    collection_name="owasp",
-    persist_directory="./chroma_db/owasp",
-    embedding_function=embeddings
-)
-
-owasp_retriever = owasp_store.as_retriever(search_kwargs={"k": 5})
+    owasp_store = Chroma(
+        collection_name="owasp",
+        persist_directory="./chroma_db/owasp",
+        embedding_function=get_embeddings(),
+    )
+    _retriever = owasp_store.as_retriever(search_kwargs={"k": 2})
+    return _retriever
