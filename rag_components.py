@@ -1,6 +1,17 @@
 import os
+from pathlib import Path
+
 from langchain_community.embeddings import HuggingFaceInferenceAPIEmbeddings
 from langchain_community.llms import HuggingFaceEndpoint
+
+# Load .env locally (Render uses dashboard Environment variables instead).
+try:
+    from dotenv import load_dotenv
+
+    # Never override variables already set by Render (or the shell).
+    load_dotenv(Path(__file__).resolve().parent / ".env", override=False)
+except ImportError:
+    pass
 
 model_name = os.getenv("MODEL_NAME", "TinyLlama/TinyLlama-1.1B-Chat-v1.0")
 embedding_model = os.getenv("EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
@@ -11,10 +22,29 @@ _llm = None
 _embeddings = None
 
 
+def hf_token_configured() -> bool:
+    for key in ("HF_TOKEN", "HUGGINGFACEHUB_API_TOKEN", "HUGGING_FACE_HUB_TOKEN"):
+        value = os.getenv(key)
+        if value and value.strip() and value.strip() != "your_huggingface_token_here":
+            return True
+    return False
+
+
+def get_hf_token() -> str:
+    """Read Hugging Face token from common environment variable names."""
+    for key in ("HF_TOKEN", "HUGGINGFACEHUB_API_TOKEN", "HUGGING_FACE_HUB_TOKEN"):
+        value = os.getenv(key)
+        if value and value.strip() and value.strip() != "your_huggingface_token_here":
+            return value.strip()
+    raise RuntimeError(
+        "Missing Hugging Face token. In Render → Environment add HF_TOKEN=hf_... "
+        "then Save and redeploy."
+    )
+
+
 def get_embeddings():
     """
     Remote embeddings via Hugging Face API — no local torch/sentence-transformers load.
-    Required for Render free tier (512MB).
     """
     global _embeddings
     if _embeddings is not None:
@@ -22,16 +52,11 @@ def get_embeddings():
 
     if not use_remote_embeddings:
         raise RuntimeError(
-            "Local embeddings are disabled for deployment. "
-            "Set USE_REMOTE_EMBEDDINGS=true and HF_TOKEN on Render."
+            "Local embeddings are disabled. Set USE_REMOTE_EMBEDDINGS=true."
         )
 
-    token = os.getenv("HF_TOKEN")
-    if not token:
-        raise RuntimeError("HF_TOKEN is required for remote embeddings.")
-
     _embeddings = HuggingFaceInferenceAPIEmbeddings(
-        api_key=token,
+        api_key=get_hf_token(),
         model_name=embedding_model,
     )
     return _embeddings
@@ -43,18 +68,11 @@ def get_llm():
         return _llm
 
     if not use_remote_llm:
-        raise RuntimeError(
-            "Local LLM is disabled for deployment. "
-            "Set USE_REMOTE_LLM=true and HF_TOKEN on Render."
-        )
-
-    token = os.getenv("HF_TOKEN")
-    if not token:
-        raise RuntimeError("HF_TOKEN is required for remote LLM.")
+        raise RuntimeError("Local LLM is disabled. Set USE_REMOTE_LLM=true.")
 
     _llm = HuggingFaceEndpoint(
         repo_id=model_name,
-        huggingfacehub_api_token=token,
+        huggingfacehub_api_token=get_hf_token(),
         max_new_tokens=int(os.getenv("MAX_NEW_TOKENS", "80")),
         temperature=0.2,
         top_p=0.9,
