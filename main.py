@@ -25,7 +25,12 @@ class QueryRequest(BaseModel):
 @app.get("/health")
 def health():
     """Fast health check — Render should use this path, not /askowasp."""
-    return {"status": "ok"}
+    from rag_components import hf_token_configured
+
+    return {
+        "status": "ok",
+        "hf_token_configured": hf_token_configured(),
+    }
 
 
 @app.post("/askowasp")
