@@ -1,17 +1,20 @@
-from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_community.vectorstores import Chroma
+from shared_embeddings import get_embeddings
 
-CHROMA_PATH = "./chroma_db/mitre_attack_v5" # Bumped to v5 to ensure clean slate
+CHROMA_PATH = "./chroma_db/mitre_attack_v5"
 COLLECTION_NAME = "mitre_enterprise_attack_v5"
 
+_vectorstore = None
+
+
 def get_vectorstore():
-    embeddings = HuggingFaceEmbeddings(
-        model_name="sentence-transformers/all-MiniLM-L6-v2"
-    )
-    
-    vectorstore = Chroma(
+    global _vectorstore
+    if _vectorstore is not None:
+        return _vectorstore
+
+    _vectorstore = Chroma(
         persist_directory=CHROMA_PATH,
-        embedding_function=embeddings,
-        collection_name=COLLECTION_NAME
+        embedding_function=get_embeddings(),
+        collection_name=COLLECTION_NAME,
     )
-    return vectorstore
+    return _vectorstore
