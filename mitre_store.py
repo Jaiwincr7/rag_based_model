@@ -1,5 +1,5 @@
 from langchain_community.vectorstores import Chroma
-from shared_embeddings import get_embeddings
+from rag_components import get_embeddings
 
 CHROMA_PATH = "./chroma_db/mitre_attack_v5"
 COLLECTION_NAME = "mitre_enterprise_attack_v5"
