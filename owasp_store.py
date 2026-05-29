@@ -1,5 +1,5 @@
 from langchain_community.vectorstores import Chroma
-from shared_embeddings import get_embeddings
+from rag_components import get_embeddings
 
 _retriever = None
 
