@@ -1,16 +1,19 @@
 import re
-from mitre_store import get_vectorstore 
+from mitre_store import get_vectorstore
 
-vectorstore = get_vectorstore()
 
 class IntentRouter:
     def __init__(self):
         # Strict Cutoff: 1.2 (Lower is better in Chroma/L2)
         # Any semantic match worse than this is ignored unless explicitly requested.
-        self.CONFIDENCE_THRESHOLD = 1.2 
+        self.CONFIDENCE_THRESHOLD = 1.2
+
+    @property
+    def vectorstore(self):
+        return get_vectorstore()
 
     def search_anchor(self, query, type_filter):
-        results = vectorstore.similarity_search_with_score(query, k=1, filter={"type": type_filter})
+        results = self.vectorstore.similarity_search_with_score(query, k=1, filter={"type": type_filter})
         if not results: return None
         doc, score = results[0]
         # Only use anchor if it's a "Good Match"
@@ -79,7 +82,7 @@ class IntentRouter:
         
         if found_tactic and "list" in q:
             # We fetch many, but strictly filter
-            results = vectorstore.similarity_search(found_tactic, k=100, filter={"type": "attack-pattern"})
+            results = self.vectorstore.similarity_search(found_tactic, k=100, filter={"type": "attack-pattern"})
             valid_hits = []
             
             for doc in results:
@@ -96,14 +99,14 @@ class IntentRouter:
         # ---------------------------------------------------------
         id_match = re.search(r"\b([TM]\d{4}(?:\.\d{3})?)\b", query.upper())
         if id_match:
-            results = vectorstore.similarity_search(query, k=1, filter={"mitre_id": id_match.group(1)})
+            results = self.vectorstore.similarity_search(query, k=1, filter={"mitre_id": id_match.group(1)})
             if results:
                 return f"📄 {results[0].metadata.get('mitre_id')} - {results[0].metadata.get('name')}\n   {results[0].page_content[:200]}..."
 
         # ---------------------------------------------------------
         # DEFAULT: Semantic Search (Capping Update)
         # ---------------------------------------------------------
-        results = vectorstore.similarity_search_with_score(query, k=3, filter={"type": "attack-pattern"})
+        results = self.vectorstore.similarity_search_with_score(query, k=3, filter={"type": "attack-pattern"})
         
         # Filter out bad scores
         good_matches = [
