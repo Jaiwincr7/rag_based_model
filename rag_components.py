@@ -8,7 +8,7 @@ try:
 except ImportError:
     pass
 
-from embeddings_fastembed import FastEmbedEmbeddings
+from langchain_core.embeddings import Embeddings
 
 model_name = os.getenv("MODEL_NAME", "TinyLlama/TinyLlama-1.1B-Chat-v1.0")
 _DEFAULT_EMBEDDING = "sentence-transformers/all-MiniLM-L6-v2"
@@ -23,6 +23,21 @@ hf_router_base = os.getenv("HF_ROUTER_BASE_URL", "https://router.huggingface.co/
 
 _llm = None
 _embedding_cache: dict[str, object] = {}
+
+
+class FastEmbedEmbeddings(Embeddings):
+    """Local ONNX embeddings — no Hugging Face Inference API required."""
+
+    def __init__(self, model_name: str = "sentence-transformers/all-MiniLM-L6-v2"):
+        from fastembed import TextEmbedding
+
+        self._model = TextEmbedding(model_name=model_name)
+
+    def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        return [vec.tolist() for vec in self._model.embed(texts)]
+
+    def embed_query(self, text: str) -> list[float]:
+        return list(self._model.embed([text]))[0].tolist()
 
 
 def hf_token_configured() -> bool:
