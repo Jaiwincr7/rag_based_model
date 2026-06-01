@@ -1,6 +1,8 @@
 import os
 from pathlib import Path
 
+from hf_legacy import LegacyHFEmbeddings, LegacyHFLLM
+
 try:
     from dotenv import load_dotenv
 
@@ -8,25 +10,15 @@ try:
 except ImportError:
     pass
 
-# Prefer new packages; fall back to langchain_community if not installed on Render.
-try:
-    from langchain_huggingface import HuggingFaceEndpoint, HuggingFaceEndpointEmbeddings
-
-    _USE_LANGCHAIN_HF = True
-except ImportError:
-    from langchain_community.embeddings import HuggingFaceInferenceAPIEmbeddings
-    from langchain_community.llms import HuggingFaceEndpoint
-
-    HuggingFaceEndpointEmbeddings = HuggingFaceInferenceAPIEmbeddings  # type: ignore
-    _USE_LANGCHAIN_HF = False
-
 model_name = os.getenv("MODEL_NAME", "TinyLlama/TinyLlama-1.1B-Chat-v1.0")
-# Use models supported by HF Inference API (read + inference token).
 _DEFAULT_EMBEDDING = "sentence-transformers/all-MiniLM-L6-v2"
 owasp_embedding_model = os.getenv("OWASP_EMBEDDING_MODEL", _DEFAULT_EMBEDDING)
 mitre_embedding_model = os.getenv("MITRE_EMBEDDING_MODEL", _DEFAULT_EMBEDDING)
 use_remote_llm = os.getenv("USE_REMOTE_LLM", "true").lower() == "true"
 use_remote_embeddings = os.getenv("USE_REMOTE_EMBEDDINGS", "true").lower() == "true"
+# Legacy api-inference.huggingface.co — works with normal read tokens (no Inference Providers).
+use_hf_legacy_api = os.getenv("USE_HF_LEGACY_API", "true").lower() == "true"
+hf_timeout = int(os.getenv("HF_TIMEOUT_SEC", "90"))
 
 _llm = None
 _owasp_embeddings = None
@@ -57,12 +49,20 @@ def _make_remote_embeddings(model: str):
         raise RuntimeError("Remote embeddings required. Set USE_REMOTE_EMBEDDINGS=true.")
 
     token = get_hf_token()
-    if _USE_LANGCHAIN_HF:
+    if use_hf_legacy_api:
+        return LegacyHFEmbeddings(model_id=model, api_key=token, timeout=hf_timeout)
+
+    # Fallback: LangChain HF router (needs Inference Providers permission on token).
+    try:
+        from langchain_huggingface import HuggingFaceEndpointEmbeddings
+
         return HuggingFaceEndpointEmbeddings(
-            model=model,
-            huggingfacehub_api_token=token,
+            model=model, huggingfacehub_api_token=token
         )
-    return HuggingFaceEndpointEmbeddings(api_key=token, model_name=model)
+    except ImportError:
+        from langchain_community.embeddings import HuggingFaceInferenceAPIEmbeddings
+
+        return HuggingFaceInferenceAPIEmbeddings(api_key=token, model_name=model)
 
 
 def get_owasp_embeddings():
@@ -87,14 +87,26 @@ def get_llm():
     if not use_remote_llm:
         raise RuntimeError("Local LLM is disabled. Set USE_REMOTE_LLM=true.")
 
-    _llm = HuggingFaceEndpoint(
-        repo_id=model_name,
-        huggingfacehub_api_token=get_hf_token(),
-        max_new_tokens=int(os.getenv("MAX_NEW_TOKENS", "80")),
-        temperature=0.2,
-        task="text-generation",
-        timeout=int(os.getenv("HF_TIMEOUT_SEC", "60")),
-    )
+    token = get_hf_token()
+    if use_hf_legacy_api:
+        _llm = LegacyHFLLM(
+            model_id=model_name,
+            api_key=token,
+            max_new_tokens=int(os.getenv("MAX_NEW_TOKENS", "80")),
+            timeout=hf_timeout,
+        )
+    else:
+        from langchain_huggingface import HuggingFaceEndpoint
+
+        _llm = HuggingFaceEndpoint(
+            repo_id=model_name,
+            huggingfacehub_api_token=token,
+            max_new_tokens=int(os.getenv("MAX_NEW_TOKENS", "80")),
+            temperature=0.2,
+            task="text-generation",
+            timeout=hf_timeout,
+        )
+
     return _llm
 
 
