@@ -33,11 +33,18 @@ def hf_token_configured() -> bool:
     return False
 
 
+def _clean_token(value: str) -> str:
+    token = value.strip()
+    if len(token) >= 2 and token[0] == token[-1] and token[0] in "\"'":
+        token = token[1:-1].strip()
+    return token
+
+
 def get_hf_token() -> str:
     for key in ("HF_TOKEN", "HUGGINGFACEHUB_API_TOKEN", "HUGGING_FACE_HUB_TOKEN"):
         value = os.getenv(key)
         if value and value.strip() and value.strip() != "your_huggingface_token_here":
-            return value.strip()
+            return _clean_token(value)
     raise RuntimeError(
         "Missing Hugging Face token. Create one at huggingface.co/settings/tokens "
         "with 'Inference Providers' permission, set HF_TOKEN on Render, redeploy."
@@ -86,15 +93,14 @@ def get_llm():
     if not use_remote_llm:
         raise RuntimeError("Local LLM is disabled. Set USE_REMOTE_LLM=true.")
 
-    from langchain_openai import ChatOpenAI
+    from hf_router_llm import HFRouterLLM
 
-    _llm = ChatOpenAI(
-        model=model_name,
+    _llm = HFRouterLLM(
+        model_id=model_name,
         api_key=get_hf_token(),
-        base_url=hf_router_base,
         max_tokens=int(os.getenv("MAX_NEW_TOKENS", "80")),
-        temperature=0.2,
         timeout=hf_timeout,
+        router_base=hf_router_base,
     )
     return _llm
 
