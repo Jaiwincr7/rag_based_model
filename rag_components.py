@@ -1,25 +1,28 @@
 import os
 from pathlib import Path
 
-from langchain_community.embeddings import HuggingFaceInferenceAPIEmbeddings
-from langchain_community.llms import HuggingFaceEndpoint
+from langchain_huggingface import HuggingFaceEndpoint, HuggingFaceEndpointEmbeddings
 
-# Load .env locally (Render uses dashboard Environment variables instead).
 try:
     from dotenv import load_dotenv
 
-    # Never override variables already set by Render (or the shell).
     load_dotenv(Path(__file__).resolve().parent / ".env", override=False)
 except ImportError:
     pass
 
 model_name = os.getenv("MODEL_NAME", "TinyLlama/TinyLlama-1.1B-Chat-v1.0")
-embedding_model = os.getenv("EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
+owasp_embedding_model = os.getenv(
+    "OWASP_EMBEDDING_MODEL", "ibm-granite/granite-embedding-107m-multilingual"
+)
+mitre_embedding_model = os.getenv(
+    "MITRE_EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2"
+)
 use_remote_llm = os.getenv("USE_REMOTE_LLM", "true").lower() == "true"
 use_remote_embeddings = os.getenv("USE_REMOTE_EMBEDDINGS", "true").lower() == "true"
 
 _llm = None
-_embeddings = None
+_owasp_embeddings = None
+_mitre_embeddings = None
 
 
 def hf_token_configured() -> bool:
@@ -31,7 +34,6 @@ def hf_token_configured() -> bool:
 
 
 def get_hf_token() -> str:
-    """Read Hugging Face token from common environment variable names."""
     for key in ("HF_TOKEN", "HUGGINGFACEHUB_API_TOKEN", "HUGGING_FACE_HUB_TOKEN"):
         value = os.getenv(key)
         if value and value.strip() and value.strip() != "your_huggingface_token_here":
@@ -42,24 +44,29 @@ def get_hf_token() -> str:
     )
 
 
-def get_embeddings():
-    """
-    Remote embeddings via Hugging Face API — no local torch/sentence-transformers load.
-    """
-    global _embeddings
-    if _embeddings is not None:
-        return _embeddings
-
+def _make_remote_embeddings(model: str):
     if not use_remote_embeddings:
-        raise RuntimeError(
-            "Local embeddings are disabled. Set USE_REMOTE_EMBEDDINGS=true."
-        )
-
-    _embeddings = HuggingFaceInferenceAPIEmbeddings(
-        api_key=get_hf_token(),
-        model_name=embedding_model,
+        raise RuntimeError("Remote embeddings required. Set USE_REMOTE_EMBEDDINGS=true.")
+    return HuggingFaceEndpointEmbeddings(
+        model=model,
+        huggingfacehub_api_token=get_hf_token(),
     )
-    return _embeddings
+
+
+def get_owasp_embeddings():
+    """Must match the model used in ingest_owasp.py."""
+    global _owasp_embeddings
+    if _owasp_embeddings is None:
+        _owasp_embeddings = _make_remote_embeddings(owasp_embedding_model)
+    return _owasp_embeddings
+
+
+def get_mitre_embeddings():
+    """Must match the model used in ingest_mitre.py."""
+    global _mitre_embeddings
+    if _mitre_embeddings is None:
+        _mitre_embeddings = _make_remote_embeddings(mitre_embedding_model)
+    return _mitre_embeddings
 
 
 def get_llm():
@@ -75,8 +82,6 @@ def get_llm():
         huggingfacehub_api_token=get_hf_token(),
         max_new_tokens=int(os.getenv("MAX_NEW_TOKENS", "80")),
         temperature=0.2,
-        top_p=0.9,
-        repetition_penalty=1.1,
         task="text-generation",
         timeout=int(os.getenv("HF_TIMEOUT_SEC", "60")),
     )
