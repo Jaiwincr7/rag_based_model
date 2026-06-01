@@ -1,14 +1,24 @@
 import os
 from pathlib import Path
 
-from langchain_huggingface import HuggingFaceEndpoint, HuggingFaceEndpointEmbeddings
-
 try:
     from dotenv import load_dotenv
 
     load_dotenv(Path(__file__).resolve().parent / ".env", override=False)
 except ImportError:
     pass
+
+# Prefer new packages; fall back to langchain_community if not installed on Render.
+try:
+    from langchain_huggingface import HuggingFaceEndpoint, HuggingFaceEndpointEmbeddings
+
+    _USE_LANGCHAIN_HF = True
+except ImportError:
+    from langchain_community.embeddings import HuggingFaceInferenceAPIEmbeddings
+    from langchain_community.llms import HuggingFaceEndpoint
+
+    HuggingFaceEndpointEmbeddings = HuggingFaceInferenceAPIEmbeddings  # type: ignore
+    _USE_LANGCHAIN_HF = False
 
 model_name = os.getenv("MODEL_NAME", "TinyLlama/TinyLlama-1.1B-Chat-v1.0")
 owasp_embedding_model = os.getenv(
@@ -47,14 +57,17 @@ def get_hf_token() -> str:
 def _make_remote_embeddings(model: str):
     if not use_remote_embeddings:
         raise RuntimeError("Remote embeddings required. Set USE_REMOTE_EMBEDDINGS=true.")
-    return HuggingFaceEndpointEmbeddings(
-        model=model,
-        huggingfacehub_api_token=get_hf_token(),
-    )
+
+    token = get_hf_token()
+    if _USE_LANGCHAIN_HF:
+        return HuggingFaceEndpointEmbeddings(
+            model=model,
+            huggingfacehub_api_token=token,
+        )
+    return HuggingFaceEndpointEmbeddings(api_key=token, model_name=model)
 
 
 def get_owasp_embeddings():
-    """Must match the model used in ingest_owasp.py."""
     global _owasp_embeddings
     if _owasp_embeddings is None:
         _owasp_embeddings = _make_remote_embeddings(owasp_embedding_model)
@@ -62,7 +75,6 @@ def get_owasp_embeddings():
 
 
 def get_mitre_embeddings():
-    """Must match the model used in ingest_mitre.py."""
     global _mitre_embeddings
     if _mitre_embeddings is None:
         _mitre_embeddings = _make_remote_embeddings(mitre_embedding_model)
