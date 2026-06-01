@@ -10,11 +10,9 @@ services:
         value: "3.11.9"
       - key: HF_TOKEN
         sync: false
+      - key: EMBEDDING_BACKEND
+        value: fastembed
       - key: USE_REMOTE_LLM
-        value: "true"
-      - key: USE_REMOTE_EMBEDDINGS
-        value: "true"
-      - key: USE_HF_LEGACY_API
         value: "true"
       - key: USE_EXTRACTIVE_ONLY
         value: "false"
@@ -24,5 +22,7 @@ services:
         value: sentence-transformers/all-MiniLM-L6-v2
       - key: MITRE_EMBEDDING_MODEL
         value: sentence-transformers/all-MiniLM-L6-v2
+      - key: HF_ROUTER_BASE_URL
+        value: https://router.huggingface.co/v1
       - key: REQUEST_TIMEOUT_SEC
         value: "90"
