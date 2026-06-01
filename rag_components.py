@@ -1,5 +1,10 @@
 import os
 from pathlib import Path
+from typing import List, Optional
+
+import requests
+from langchain_core.embeddings import Embeddings
+from langchain_core.language_models.llms import LLM
 
 try:
     from dotenv import load_dotenv
@@ -7,8 +12,6 @@ try:
     load_dotenv(Path(__file__).resolve().parent / ".env", override=False)
 except ImportError:
     pass
-
-from langchain_core.embeddings import Embeddings
 
 model_name = os.getenv("MODEL_NAME", "TinyLlama/TinyLlama-1.1B-Chat-v1.0")
 _DEFAULT_EMBEDDING = "sentence-transformers/all-MiniLM-L6-v2"
@@ -38,6 +41,52 @@ class FastEmbedEmbeddings(Embeddings):
 
     def embed_query(self, text: str) -> list[float]:
         return list(self._model.embed([text]))[0].tolist()
+
+
+class HFRouterLLM(LLM):
+    """Hugging Face Inference Providers router (OpenAI-compatible chat API)."""
+
+    model_id: str
+    api_key: str
+    max_tokens: int = 80
+    timeout: int = 90
+    router_base: str = "https://router.huggingface.co/v1"
+
+    @property
+    def _llm_type(self) -> str:
+        return "hf_router"
+
+    def _call(
+        self,
+        prompt: str,
+        stop: Optional[List[str]] = None,
+        run_manager=None,
+        **kwargs,
+    ) -> str:
+        url = f"{self.router_base.rstrip('/')}/chat/completions"
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+        }
+        payload = {
+            "model": self.model_id,
+            "messages": [{"role": "user", "content": prompt}],
+            "max_tokens": self.max_tokens,
+            "temperature": 0.2,
+        }
+
+        resp = requests.post(
+            url, headers=headers, json=payload, timeout=self.timeout
+        )
+
+        if resp.status_code == 401:
+            raise RuntimeError(
+                "HF router 401: invalid or missing token. Use a fine-grained HF token "
+                "with 'Inference Providers' permission, or set USE_EXTRACTIVE_ONLY=true."
+            )
+
+        resp.raise_for_status()
+        return resp.json()["choices"][0]["message"]["content"]
 
 
 def hf_token_configured() -> bool:
@@ -107,8 +156,6 @@ def get_llm():
 
     if not use_remote_llm:
         raise RuntimeError("Local LLM is disabled. Set USE_REMOTE_LLM=true.")
-
-    from hf_router_llm import HFRouterLLM
 
     _llm = HFRouterLLM(
         model_id=model_name,
