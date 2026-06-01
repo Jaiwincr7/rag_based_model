@@ -13,7 +13,8 @@ try:
 except ImportError:
     pass
 
-model_name = os.getenv("MODEL_NAME", "TinyLlama/TinyLlama-1.1B-Chat-v1.0")
+# Use a model available on HF Inference Providers (append :hf-inference if needed).
+model_name = os.getenv("MODEL_NAME", "Qwen/Qwen2.5-0.5B-Instruct")
 _DEFAULT_EMBEDDING = "sentence-transformers/all-MiniLM-L6-v2"
 owasp_embedding_model = os.getenv("OWASP_EMBEDDING_MODEL", _DEFAULT_EMBEDDING)
 mitre_embedding_model = os.getenv("MITRE_EMBEDDING_MODEL", _DEFAULT_EMBEDDING)
@@ -43,8 +44,58 @@ class FastEmbedEmbeddings(Embeddings):
         return list(self._model.embed([text]))[0].tolist()
 
 
+def resolve_model_id(model_id: str) -> str:
+    """Router expects model[:provider], e.g. Qwen/...:hf-inference."""
+    if ":" in model_id:
+        return model_id
+    provider = os.getenv("HF_MODEL_PROVIDER", "hf-inference").strip()
+    if provider:
+        return f"{model_id}:{provider}"
+    return model_id
+
+
+def hf_chat_complete(
+    messages: list[dict],
+    *,
+    max_tokens: int | None = None,
+) -> str:
+    """Call HF router chat/completions with structured messages."""
+    model = resolve_model_id(model_name)
+    url = f"{hf_router_base.rstrip('/')}/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {get_hf_token()}",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "model": model,
+        "messages": messages,
+        "max_tokens": max_tokens or int(os.getenv("MAX_NEW_TOKENS", "256")),
+        "temperature": 0.2,
+        "stream": False,
+    }
+
+    resp = requests.post(url, headers=headers, json=payload, timeout=hf_timeout)
+
+    if resp.status_code == 401:
+        raise RuntimeError(
+            "HF router 401: invalid token. Use a fine-grained token with "
+            "'Inference Providers' permission, or USE_EXTRACTIVE_ONLY=true."
+        )
+
+    if not resp.ok:
+        try:
+            detail = resp.json()
+        except Exception:
+            detail = resp.text
+        raise RuntimeError(
+            f"HF router {resp.status_code} for model '{model}': {detail}"
+        )
+
+    return resp.json()["choices"][0]["message"]["content"]
+
+
 class HFRouterLLM(LLM):
-    """Hugging Face Inference Providers router (OpenAI-compatible chat API)."""
+    """LangChain LLM wrapper around hf_chat_complete (single user message)."""
 
     model_id: str
     api_key: str
@@ -63,30 +114,10 @@ class HFRouterLLM(LLM):
         run_manager=None,
         **kwargs,
     ) -> str:
-        url = f"{self.router_base.rstrip('/')}/chat/completions"
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json",
-        }
-        payload = {
-            "model": self.model_id,
-            "messages": [{"role": "user", "content": prompt}],
-            "max_tokens": self.max_tokens,
-            "temperature": 0.2,
-        }
-
-        resp = requests.post(
-            url, headers=headers, json=payload, timeout=self.timeout
+        return hf_chat_complete(
+            [{"role": "user", "content": prompt}],
+            max_tokens=self.max_tokens,
         )
-
-        if resp.status_code == 401:
-            raise RuntimeError(
-                "HF router 401: invalid or missing token. Use a fine-grained HF token "
-                "with 'Inference Providers' permission, or set USE_EXTRACTIVE_ONLY=true."
-            )
-
-        resp.raise_for_status()
-        return resp.json()["choices"][0]["message"]["content"]
 
 
 def hf_token_configured() -> bool:
