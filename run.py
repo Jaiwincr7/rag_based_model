@@ -37,6 +37,7 @@ def health():
     return {
         "status": "ok",
         "hf_token_configured": hf_token_configured(),
+        "embedding_backend": os.getenv("EMBEDDING_BACKEND", "fastembed"),
         "owasp_db_present": owasp_db,
         "mitre_db_present": mitre_db,
     }
