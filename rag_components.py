@@ -1,8 +1,6 @@
 import os
 from pathlib import Path
 
-from hf_legacy import LegacyHFEmbeddings, LegacyHFLLM
-
 try:
     from dotenv import load_dotenv
 
@@ -10,19 +8,21 @@ try:
 except ImportError:
     pass
 
+from embeddings_fastembed import FastEmbedEmbeddings
+
 model_name = os.getenv("MODEL_NAME", "TinyLlama/TinyLlama-1.1B-Chat-v1.0")
 _DEFAULT_EMBEDDING = "sentence-transformers/all-MiniLM-L6-v2"
 owasp_embedding_model = os.getenv("OWASP_EMBEDDING_MODEL", _DEFAULT_EMBEDDING)
 mitre_embedding_model = os.getenv("MITRE_EMBEDDING_MODEL", _DEFAULT_EMBEDDING)
+
+# fastembed = local ONNX (~80MB). hf_router = needs Inference Providers on token.
+embedding_backend = os.getenv("EMBEDDING_BACKEND", "fastembed").lower()
 use_remote_llm = os.getenv("USE_REMOTE_LLM", "true").lower() == "true"
-use_remote_embeddings = os.getenv("USE_REMOTE_EMBEDDINGS", "true").lower() == "true"
-# Legacy api-inference.huggingface.co — works with normal read tokens (no Inference Providers).
-use_hf_legacy_api = os.getenv("USE_HF_LEGACY_API", "true").lower() == "true"
 hf_timeout = int(os.getenv("HF_TIMEOUT_SEC", "90"))
+hf_router_base = os.getenv("HF_ROUTER_BASE_URL", "https://router.huggingface.co/v1")
 
 _llm = None
-_owasp_embeddings = None
-_mitre_embeddings = None
+_embedding_cache: dict[str, object] = {}
 
 
 def hf_token_configured() -> bool:
@@ -39,44 +39,43 @@ def get_hf_token() -> str:
         if value and value.strip() and value.strip() != "your_huggingface_token_here":
             return value.strip()
     raise RuntimeError(
-        "Missing Hugging Face token. In Render → Environment add HF_TOKEN=hf_... "
-        "then Save and redeploy."
+        "Missing Hugging Face token. Create one at huggingface.co/settings/tokens "
+        "with 'Inference Providers' permission, set HF_TOKEN on Render, redeploy."
     )
 
 
-def _make_remote_embeddings(model: str):
-    if not use_remote_embeddings:
-        raise RuntimeError("Remote embeddings required. Set USE_REMOTE_EMBEDDINGS=true.")
+def _build_embeddings(model: str):
+    if embedding_backend == "fastembed":
+        return FastEmbedEmbeddings(model_name=model)
 
-    token = get_hf_token()
-    if use_hf_legacy_api:
-        return LegacyHFEmbeddings(model_id=model, api_key=token, timeout=hf_timeout)
+    if embedding_backend == "hf_router":
+        token = get_hf_token()
+        try:
+            from langchain_huggingface import HuggingFaceEndpointEmbeddings
 
-    # Fallback: LangChain HF router (needs Inference Providers permission on token).
-    try:
-        from langchain_huggingface import HuggingFaceEndpointEmbeddings
+            return HuggingFaceEndpointEmbeddings(
+                model=model, huggingfacehub_api_token=token
+            )
+        except ImportError:
+            from langchain_community.embeddings import HuggingFaceInferenceAPIEmbeddings
 
-        return HuggingFaceEndpointEmbeddings(
-            model=model, huggingfacehub_api_token=token
-        )
-    except ImportError:
-        from langchain_community.embeddings import HuggingFaceInferenceAPIEmbeddings
+            return HuggingFaceInferenceAPIEmbeddings(api_key=token, model_name=model)
 
-        return HuggingFaceInferenceAPIEmbeddings(api_key=token, model_name=model)
+    raise ValueError(
+        f"Unknown EMBEDDING_BACKEND={embedding_backend}. Use 'fastembed' or 'hf_router'."
+    )
 
 
 def get_owasp_embeddings():
-    global _owasp_embeddings
-    if _owasp_embeddings is None:
-        _owasp_embeddings = _make_remote_embeddings(owasp_embedding_model)
-    return _owasp_embeddings
+    if owasp_embedding_model not in _embedding_cache:
+        _embedding_cache[owasp_embedding_model] = _build_embeddings(owasp_embedding_model)
+    return _embedding_cache[owasp_embedding_model]
 
 
 def get_mitre_embeddings():
-    global _mitre_embeddings
-    if _mitre_embeddings is None:
-        _mitre_embeddings = _make_remote_embeddings(mitre_embedding_model)
-    return _mitre_embeddings
+    if mitre_embedding_model not in _embedding_cache:
+        _embedding_cache[mitre_embedding_model] = _build_embeddings(mitre_embedding_model)
+    return _embedding_cache[mitre_embedding_model]
 
 
 def get_llm():
@@ -87,26 +86,16 @@ def get_llm():
     if not use_remote_llm:
         raise RuntimeError("Local LLM is disabled. Set USE_REMOTE_LLM=true.")
 
-    token = get_hf_token()
-    if use_hf_legacy_api:
-        _llm = LegacyHFLLM(
-            model_id=model_name,
-            api_key=token,
-            max_new_tokens=int(os.getenv("MAX_NEW_TOKENS", "80")),
-            timeout=hf_timeout,
-        )
-    else:
-        from langchain_huggingface import HuggingFaceEndpoint
+    from langchain_openai import ChatOpenAI
 
-        _llm = HuggingFaceEndpoint(
-            repo_id=model_name,
-            huggingfacehub_api_token=token,
-            max_new_tokens=int(os.getenv("MAX_NEW_TOKENS", "80")),
-            temperature=0.2,
-            task="text-generation",
-            timeout=hf_timeout,
-        )
-
+    _llm = ChatOpenAI(
+        model=model_name,
+        api_key=get_hf_token(),
+        base_url=hf_router_base,
+        max_tokens=int(os.getenv("MAX_NEW_TOKENS", "80")),
+        temperature=0.2,
+        timeout=hf_timeout,
+    )
     return _llm
 
 
