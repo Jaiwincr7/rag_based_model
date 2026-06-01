@@ -58,8 +58,9 @@ print(f"✅ Created {len(splits)} text chunks.")
 
 # 5. Embeddings
 print("⏳ Loading Embedding Model...")
+# Must match OWASP_EMBEDDING_MODEL on Render (HF Inference API supports this model).
 embeddings = HuggingFaceEmbeddings(
-    model_name="ibm-granite/granite-embedding-107m-multilingual"
+    model_name="sentence-transformers/all-MiniLM-L6-v2"
 )
 
 # 6. SAVE TO DISK
