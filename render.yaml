@@ -19,7 +19,7 @@ services:
       - key: MODEL_NAME
         value: TinyLlama/TinyLlama-1.1B-Chat-v1.0
       - key: OWASP_EMBEDDING_MODEL
-        value: ibm-granite/granite-embedding-107m-multilingual
+        value: sentence-transformers/all-MiniLM-L6-v2
       - key: MITRE_EMBEDDING_MODEL
         value: sentence-transformers/all-MiniLM-L6-v2
       - key: REQUEST_TIMEOUT_SEC
