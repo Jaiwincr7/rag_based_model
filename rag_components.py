@@ -21,12 +21,10 @@ except ImportError:
     _USE_LANGCHAIN_HF = False
 
 model_name = os.getenv("MODEL_NAME", "TinyLlama/TinyLlama-1.1B-Chat-v1.0")
-owasp_embedding_model = os.getenv(
-    "OWASP_EMBEDDING_MODEL", "ibm-granite/granite-embedding-107m-multilingual"
-)
-mitre_embedding_model = os.getenv(
-    "MITRE_EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2"
-)
+# Use models supported by HF Inference API (read + inference token).
+_DEFAULT_EMBEDDING = "sentence-transformers/all-MiniLM-L6-v2"
+owasp_embedding_model = os.getenv("OWASP_EMBEDDING_MODEL", _DEFAULT_EMBEDDING)
+mitre_embedding_model = os.getenv("MITRE_EMBEDDING_MODEL", _DEFAULT_EMBEDDING)
 use_remote_llm = os.getenv("USE_REMOTE_LLM", "true").lower() == "true"
 use_remote_embeddings = os.getenv("USE_REMOTE_EMBEDDINGS", "true").lower() == "true"
 
