@@ -1,85 +1,122 @@
-import bs4
-import shutil
-import os
-import sys
-from langchain_community.document_loaders import WebBaseLoader
-from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_community.embeddings import HuggingFaceEmbeddings
-from langchain_community.vectorstores import Chroma 
+"""
+Ingest OWASP Top 10 2021 from GitHub markdown (stable; owasp.org often returns redirect HTML).
+Run locally, then deploy ./chroma_db/owasp to Render.
 
-# 1. CORRECT URLs
-urls = [
-    "https://owasp.org/Top10/A00_2021_Introduction/",
-    "https://owasp.org/Top10/A01_2021-Broken_Access_Control/",
-    "https://owasp.org/Top10/A02_2021-Cryptographic_Failures/",
-    "https://owasp.org/Top10/A03_2021-Injection/",
-    "https://owasp.org/Top10/A04_2021-Insecure_Design/",
-    "https://owasp.org/Top10/A05_2021-Security_Misconfiguration/",
-    "https://owasp.org/Top10/A06_2021-Vulnerable_and_Outdated_Components/",
-    "https://owasp.org/Top10/A07_2021-Identification_and_Authentication_Failures/",
-    "https://owasp.org/Top10/A08_2021-Software_and_Data_Integrity_Failures/",
-    "https://owasp.org/Top10/A09_2021-Security_Logging_and_Monitoring_Failures/",
-    "https://owasp.org/Top10/A10_2021-Server-Side_Request_Forgery_%28SSRF%29/",
+  python ingest_owasp.py
+"""
+
+import os
+import shutil
+import sys
+
+import requests
+from langchain_community.embeddings import HuggingFaceEmbeddings
+from langchain_community.vectorstores import Chroma
+from langchain_core.documents import Document
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+
+GITHUB_RAW_BASE = (
+    "https://raw.githubusercontent.com/OWASP/Top10/master/2021/docs"
+)
+
+# Filenames match OWASP/Top10 repo (2021/docs/)
+OWASP_MARKDOWN_FILES = [
+    "index.md",
+    "A00_2021_Introduction.md",
+    "A01_2021-Broken_Access_Control.md",
+    "A02_2021-Cryptographic_Failures.md",
+    "A03_2021-Injection.md",
+    "A04_2021-Insecure_Design.md",
+    "A05_2021-Security_Misconfiguration.md",
+    "A06_2021-Vulnerable_and_Outdated_Components.md",
+    "A07_2021-Identification_and_Authentication_Failures.md",
+    "A08_2021-Software_and_Data_Integrity_Failures.md",
+    "A09_2021-Security_Logging_and_Monitoring_Failures.md",
+    "A10_2021-Server-Side_Request_Forgery_(SSRF).md",
 ]
 
-print("📥 Downloading pages...")
+EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
+DB_PATH = "./chroma_db/owasp"
 
-# 2. NO FILTER (Safest Approach)
-# We removed bs_kwargs to ensure we get ALL text.
-loader = WebBaseLoader(
-    web_path=urls,
-    header_template={
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-    }
-)
-docs = loader.load()
 
-# DEBUG: Check if we actually have text now
-print(f"✅ Found {len(docs)} documents.")
-if len(docs) > 0:
-    print(f"🔎 Sample content from Doc 1: {docs[1].page_content[:200]}...") 
+def is_useful_content(text: str) -> bool:
+    """Drop redirect stubs and near-empty pages."""
+    cleaned = text.strip()
+    if len(cleaned) < 200:
+        return False
+    lower = cleaned.lower()
+    if "redirecting to owasp top 10" in lower and len(cleaned) < 800:
+        return False
+    if lower.count("redirecting") >= 2 and len(cleaned) < 1000:
+        return False
+    return True
 
-# 3. Add Metadata
-for d in docs:
-    d.metadata["source"] = "OWASP"
 
-# 4. Split Text
-splitter = RecursiveCharacterTextSplitter(
-    chunk_size=1000, 
-    chunk_overlap=100
-)
-splits = splitter.split_documents(docs)
+def load_markdown_doc(filename: str) -> Document | None:
+    url = f"{GITHUB_RAW_BASE}/{filename}"
+    print(f"  fetching {url}")
+    resp = requests.get(url, timeout=60)
+    if resp.status_code == 404:
+        print(f"  ⚠️  not found: {filename}")
+        return None
+    resp.raise_for_status()
+    text = resp.text
+    if not is_useful_content(text):
+        print(f"  ⚠️  skipped low-quality content: {filename}")
+        return None
+    return Document(
+        page_content=text,
+        metadata={"source": f"OWASP/{filename}", "url": url},
+    )
 
-if len(splits) == 0:
-    print("❌ ERROR: Documents are still empty! The website might require JavaScript.")
-    sys.exit()
 
-print(f"✅ Created {len(splits)} text chunks.")
+def main():
+    print("📥 Loading OWASP Top 10 2021 from GitHub markdown...")
+    docs: list[Document] = []
+    for filename in OWASP_MARKDOWN_FILES:
+        doc = load_markdown_doc(filename)
+        if doc:
+            docs.append(doc)
 
-# 5. Embeddings
-print("⏳ Loading Embedding Model...")
-# Must match OWASP_EMBEDDING_MODEL on Render (HF Inference API supports this model).
-embeddings = HuggingFaceEmbeddings(
-    model_name="sentence-transformers/all-MiniLM-L6-v2"
-)
+    if not docs:
+        print("❌ No documents loaded. Check network or filenames.")
+        sys.exit(1)
 
-# 6. SAVE TO DISK
-db_path = "./chroma_db/owasp"
+    print(f"✅ Loaded {len(docs)} documents.")
+    print(f"🔎 Sample: {docs[0].page_content[:200].replace(chr(10), ' ')}...")
 
-# CLEANUP: Remove old DB to prevent corruption
-if os.path.exists(db_path):
-    try:
-        shutil.rmtree(db_path)
-        print(f"🧹 Removed old database at {db_path}")
-    except PermissionError:
-        print("⚠️  Warning: Could not delete old DB folder. Please close any running terminals using it.")
+    splitter = RecursiveCharacterTextSplitter(
+        chunk_size=1000,
+        chunk_overlap=150,
+    )
+    splits = splitter.split_documents(docs)
+    splits = [s for s in splits if is_useful_content(s.page_content)]
 
-print("💾 Saving to ChromaDB...")
-vectorstore = Chroma.from_documents(
-    documents=splits,
-    embedding=embeddings,
-    collection_name="owasp",
-    persist_directory=db_path
-)
+    if not splits:
+        print("❌ No chunks after splitting.")
+        sys.exit(1)
 
-print(f"🎉 SUCCESS: Database created at {db_path}")
+    print(f"✅ Created {len(splits)} chunks.")
+
+    print(f"⏳ Embedding with {EMBEDDING_MODEL}...")
+    embeddings = HuggingFaceEmbeddings(model_name=EMBEDDING_MODEL)
+
+    if os.path.exists(DB_PATH):
+        try:
+            shutil.rmtree(DB_PATH)
+            print(f"🧹 Removed old database at {DB_PATH}")
+        except PermissionError:
+            print("⚠️  Close apps using chroma_db, then rerun.")
+
+    print("💾 Saving to ChromaDB...")
+    Chroma.from_documents(
+        documents=splits,
+        embedding=embeddings,
+        collection_name="owasp",
+        persist_directory=DB_PATH,
+    )
+    print(f"🎉 SUCCESS: {DB_PATH} ready. Commit and deploy chroma_db/owasp to Render.")
+
+
+if __name__ == "__main__":
+    main()
