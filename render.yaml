@@ -3,7 +3,8 @@ services:
     name: rag-based-model
     runtime: python
     plan: free
-    buildCommand: pip install --upgrade pip && pip install -r requirements.txt && python ingest_owasp.py
+    # Do NOT run ingest here — it OOMs on 512MB. Build chroma_db locally and commit it.
+    buildCommand: pip install --upgrade pip && pip install -r requirements.txt
     startCommand: gunicorn -k uvicorn.workers.UvicornWorker backend:app --bind 0.0.0.0:$PORT --workers 1 --timeout 180
     envVars:
       - key: PYTHON_VERSION
@@ -13,18 +14,18 @@ services:
       - key: EMBEDDING_BACKEND
         value: fastembed
       - key: AUTO_BUILD_OWASP_DB
-        value: "true"
+        value: "false"
       - key: USE_REMOTE_LLM
-        value: "true"
+        value: "false"
       - key: USE_EXTRACTIVE_ONLY
         value: "true"
-      - key: MODEL_NAME
-        value: Qwen/Qwen2.5-0.5B-Instruct
       - key: OWASP_EMBEDDING_MODEL
         value: sentence-transformers/all-MiniLM-L6-v2
       - key: MITRE_EMBEDDING_MODEL
         value: sentence-transformers/all-MiniLM-L6-v2
-      - key: HF_ROUTER_BASE_URL
-        value: https://router.huggingface.co/v1
       - key: REQUEST_TIMEOUT_SEC
         value: "90"
+      - key: OMP_NUM_THREADS
+        value: "1"
+      - key: ORT_LOG_SEVERITY_LEVEL
+        value: "3"
