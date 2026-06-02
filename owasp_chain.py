@@ -35,8 +35,8 @@ def owasp_print(query: str) -> str:
         msg = str(e)
         if "model_not_supported" in msg or "not supported by any provider" in msg:
             return (
-                "LLM provider access is not available for the configured HF model. "
-                "Returning extracted OWASP context instead:\n\n"
+                "Note: generative LLM is unavailable on your HF account; "
+                "showing retrieved OWASP excerpts:\n\n"
                 f"{context}"
             )
         raise
