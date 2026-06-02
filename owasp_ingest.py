@@ -1,5 +1,6 @@
-"""Build OWASP Chroma index from GitHub markdown (shared by CLI + runtime auto-rebuild)."""
+"""Build OWASP Chroma index from GitHub markdown (run locally; not on Render 512MB)."""
 
+import gc
 import os
 import shutil
 
@@ -54,42 +55,53 @@ def load_markdown_doc(filename: str) -> Document | None:
 def build_owasp_db(force: bool = False) -> int:
     """
     Download OWASP Top 10 2021 (en) and write chroma_db/owasp.
-    Uses fastembed — same as production on Render.
-    Returns number of chunks stored.
+    Processes one file at a time to limit peak RAM (for local ingest).
     """
     from rag_components import FastEmbedEmbeddings, owasp_embedding_model
 
     if force and os.path.exists(DB_PATH):
         shutil.rmtree(DB_PATH, ignore_errors=True)
 
-    docs: list[Document] = []
+    embeddings = FastEmbedEmbeddings(model_name=owasp_embedding_model)
+    splitter = RecursiveCharacterTextSplitter(
+        chunk_size=800,
+        chunk_overlap=100,
+    )
+
+    os.makedirs(os.path.dirname(DB_PATH) or ".", exist_ok=True)
+    vectorstore = None
+    total = 0
+
     for filename in OWASP_MARKDOWN_FILES:
         doc = load_markdown_doc(filename)
-        if doc:
-            docs.append(doc)
+        if not doc:
+            continue
 
-    if not docs:
+        splits = splitter.split_documents([doc])
+        splits = [s for s in splits if is_useful_content(s.page_content)]
+        del doc
+
+        if not splits:
+            gc.collect()
+            continue
+
+        if vectorstore is None:
+            vectorstore = Chroma.from_documents(
+                documents=splits,
+                embedding=embeddings,
+                collection_name="owasp",
+                persist_directory=DB_PATH,
+            )
+        else:
+            vectorstore.add_documents(splits)
+
+        total += len(splits)
+        del splits
+        gc.collect()
+
+    if vectorstore is None or total == 0:
         raise RuntimeError(
-            "Could not download OWASP markdown from GitHub. Check network."
+            "Could not build OWASP index. Check network and GitHub URLs."
         )
 
-    splitter = RecursiveCharacterTextSplitter(
-        chunk_size=1000,
-        chunk_overlap=150,
-    )
-    splits = splitter.split_documents(docs)
-    splits = [s for s in splits if is_useful_content(s.page_content)]
-
-    if not splits:
-        raise RuntimeError("No valid OWASP chunks after filtering.")
-
-    embeddings = FastEmbedEmbeddings(model_name=owasp_embedding_model)
-    os.makedirs(os.path.dirname(DB_PATH) or ".", exist_ok=True)
-
-    Chroma.from_documents(
-        documents=splits,
-        embedding=embeddings,
-        collection_name="owasp",
-        persist_directory=DB_PATH,
-    )
-    return len(splits)
+    return total
