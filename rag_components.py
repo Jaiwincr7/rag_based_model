@@ -226,10 +226,14 @@ def get_llm():
 
 
 def format_docs(docs):
+    import re
+
+    max_chars = int(os.getenv("EXCERPT_MAX_CHARS", "900"))
     formatted = []
     for d in docs:
         source = d.metadata.get("source") or d.metadata.get("url") or "OWASP"
-        formatted.append(
-            f"[SOURCE: {source}]\n{d.page_content.strip()[:500]}"
-        )
+        text = d.page_content.strip()
+        text = re.sub(r"!\[[^\]]*\]\([^)]+\)", "", text)  # drop markdown images
+        text = re.sub(r"\n{3,}", "\n\n", text).strip()[:max_chars]
+        formatted.append(f"[SOURCE: {source}]\n{text}")
     return "\n\n".join(formatted)
