@@ -34,7 +34,7 @@ class IntentRouter:
     def __init__(self):
         # Strict Cutoff: 1.2 (Lower is better in Chroma/L2)
         # Any semantic match worse than this is ignored unless explicitly requested.
-        self.CONFIDENCE_THRESHOLD = 1.2
+        self.CONFIDENCE_THRESHOLD = 0.7
 
     @property
     def vectorstore(self):
