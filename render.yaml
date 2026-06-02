@@ -3,7 +3,7 @@ services:
     name: rag-based-model
     runtime: python
     plan: free
-    buildCommand: pip install --upgrade pip && pip install -r requirements.txt
+    buildCommand: pip install --upgrade pip && pip install -r requirements.txt && python ingest_owasp.py
     startCommand: gunicorn -k uvicorn.workers.UvicornWorker backend:app --bind 0.0.0.0:$PORT --workers 1 --timeout 180
     envVars:
       - key: PYTHON_VERSION
@@ -12,6 +12,8 @@ services:
         sync: false
       - key: EMBEDDING_BACKEND
         value: fastembed
+      - key: AUTO_BUILD_OWASP_DB
+        value: "true"
       - key: USE_REMOTE_LLM
         value: "true"
       - key: USE_EXTRACTIVE_ONLY
