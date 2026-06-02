@@ -13,11 +13,18 @@ Context:
 """
 
 
+def _use_extractive_mode() -> bool:
+    if os.getenv("USE_EXTRACTIVE_ONLY", "false").lower() == "true":
+        return True
+    # Render 512MB: USE_REMOTE_LLM=false means skip HF router entirely.
+    return os.getenv("USE_REMOTE_LLM", "true").lower() == "false"
+
+
 def owasp_print(query: str) -> str:
     docs = retrieve_owasp_docs(query)
     context = format_docs(docs)
 
-    if os.getenv("USE_EXTRACTIVE_ONLY", "false").lower() == "true":
+    if _use_extractive_mode():
         return context
 
     messages = [
