@@ -35,10 +35,18 @@ class FastEmbedEmbeddings(Embeddings):
     def __init__(self, model_name: str = "sentence-transformers/all-MiniLM-L6-v2"):
         from fastembed import TextEmbedding
 
-        self._model = TextEmbedding(model_name=model_name)
+        self._model = TextEmbedding(
+            model_name=model_name,
+            threads=int(os.getenv("OMP_NUM_THREADS", "1")),
+        )
 
     def embed_documents(self, texts: list[str]) -> list[list[float]]:
-        return [vec.tolist() for vec in self._model.embed(texts)]
+        batch_size = int(os.getenv("EMBED_BATCH_SIZE", "8"))
+        out: list[list[float]] = []
+        for i in range(0, len(texts), batch_size):
+            batch = texts[i : i + batch_size]
+            out.extend(vec.tolist() for vec in self._model.embed(batch))
+        return out
 
     def embed_query(self, text: str) -> list[float]:
         return list(self._model.embed([text]))[0].tolist()
