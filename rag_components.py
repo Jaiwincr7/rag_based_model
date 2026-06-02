@@ -48,7 +48,7 @@ def resolve_model_id(model_id: str) -> str:
     """Router expects model[:provider], e.g. Qwen/...:hf-inference."""
     if ":" in model_id:
         return model_id
-    provider = os.getenv("HF_MODEL_PROVIDER", "hf-inference").strip()
+    provider = os.getenv("HF_MODEL_PROVIDER", "").strip()
     if provider:
         return f"{model_id}:{provider}"
     return model_id
@@ -87,6 +87,25 @@ def hf_chat_complete(
             detail = resp.json()
         except Exception:
             detail = resp.text
+        # If provider-specific routing fails, retry once with provider omitted.
+        if (
+            resp.status_code == 400
+            and isinstance(detail, dict)
+            and "error" in detail
+            and isinstance(detail["error"], dict)
+            and detail["error"].get("code") == "model_not_supported"
+            and ":" in model
+        ):
+            fallback_model = model.split(":", 1)[0]
+            payload["model"] = fallback_model
+            retry = requests.post(url, headers=headers, json=payload, timeout=hf_timeout)
+            if retry.ok:
+                return retry.json()["choices"][0]["message"]["content"]
+            try:
+                detail = retry.json()
+            except Exception:
+                detail = retry.text
+            model = fallback_model
         raise RuntimeError(
             f"HF router {resp.status_code} for model '{model}': {detail}"
         )
