@@ -15,7 +15,7 @@ services:
       - key: USE_REMOTE_LLM
         value: "true"
       - key: USE_EXTRACTIVE_ONLY
-        value: "false"
+        value: "true"
       - key: MODEL_NAME
         value: Qwen/Qwen2.5-0.5B-Instruct
       - key: OWASP_EMBEDDING_MODEL
