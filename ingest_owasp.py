@@ -1,20 +1,14 @@
-"""
-Ingest OWASP Top 10 2021 from GitHub English markdown.
-Run locally, then deploy ./chroma_db/owasp to Render:
-
-  pip install requests sentence-transformers langchain-community chromadb langchain-text-splitters
-  python ingest_owasp.py
-"""
+"""Build OWASP Chroma index from GitHub markdown (shared by CLI + runtime auto-rebuild)."""
 
 import os
 import shutil
-import sys
 
 import requests
-from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_community.vectorstores import Chroma
 from langchain_core.documents import Document
 from langchain_text_splitters import RecursiveCharacterTextSplitter
+
+from owasp_utils import is_junk_chunk
 
 GITHUB_RAW_BASE = (
     "https://raw.githubusercontent.com/OWASP/Top10/master/2021/docs/en"
@@ -35,33 +29,21 @@ OWASP_MARKDOWN_FILES = [
     "A10_2021-Server-Side_Request_Forgery_(SSRF).md",
 ]
 
-EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 DB_PATH = "./chroma_db/owasp"
 
 
 def is_useful_content(text: str) -> bool:
-    cleaned = text.strip()
-    if len(cleaned) < 200:
-        return False
-    lower = cleaned.lower()
-    if "redirecting to owasp top 10" in lower and len(cleaned) < 800:
-        return False
-    if lower.count("redirecting") >= 2 and len(cleaned) < 1000:
-        return False
-    return True
+    return not is_junk_chunk(text)
 
 
 def load_markdown_doc(filename: str) -> Document | None:
     url = f"{GITHUB_RAW_BASE}/{filename}"
-    print(f"  fetching {filename} ...")
     resp = requests.get(url, timeout=60)
     if resp.status_code == 404:
-        print(f"  ⚠️  404: {filename}")
         return None
     resp.raise_for_status()
     text = resp.text
     if not is_useful_content(text):
-        print(f"  ⚠️  skipped low-quality: {filename}")
         return None
     return Document(
         page_content=text,
@@ -69,8 +51,17 @@ def load_markdown_doc(filename: str) -> Document | None:
     )
 
 
-def main():
-    print("📥 Loading OWASP Top 10 2021 (GitHub en/)...")
+def build_owasp_db(force: bool = False) -> int:
+    """
+    Download OWASP Top 10 2021 (en) and write chroma_db/owasp.
+    Uses fastembed — same as production on Render.
+    Returns number of chunks stored.
+    """
+    from rag_components import FastEmbedEmbeddings, owasp_embedding_model
+
+    if force and os.path.exists(DB_PATH):
+        shutil.rmtree(DB_PATH, ignore_errors=True)
+
     docs: list[Document] = []
     for filename in OWASP_MARKDOWN_FILES:
         doc = load_markdown_doc(filename)
@@ -78,12 +69,9 @@ def main():
             docs.append(doc)
 
     if not docs:
-        print("❌ No documents loaded. Check internet or filenames.")
-        sys.exit(1)
-
-    print(f"✅ Loaded {len(docs)} documents.")
-    sample = docs[0].page_content[:180].replace("\n", " ")
-    print(f"🔎 Sample: {sample}...")
+        raise RuntimeError(
+            "Could not download OWASP markdown from GitHub. Check network."
+        )
 
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=1000,
@@ -93,30 +81,15 @@ def main():
     splits = [s for s in splits if is_useful_content(s.page_content)]
 
     if not splits:
-        print("❌ No chunks after splitting.")
-        sys.exit(1)
+        raise RuntimeError("No valid OWASP chunks after filtering.")
 
-    print(f"✅ Created {len(splits)} chunks.")
+    embeddings = FastEmbedEmbeddings(model_name=owasp_embedding_model)
+    os.makedirs(os.path.dirname(DB_PATH) or ".", exist_ok=True)
 
-    print(f"⏳ Embedding ({EMBEDDING_MODEL}) — first run downloads the model...")
-    embeddings = HuggingFaceEmbeddings(model_name=EMBEDDING_MODEL)
-
-    if os.path.exists(DB_PATH):
-        try:
-            shutil.rmtree(DB_PATH)
-            print(f"🧹 Removed old DB at {DB_PATH}")
-        except PermissionError:
-            print("⚠️  Close apps using chroma_db, then rerun.")
-
-    print("💾 Writing ChromaDB...")
     Chroma.from_documents(
         documents=splits,
         embedding=embeddings,
         collection_name="owasp",
         persist_directory=DB_PATH,
     )
-    print(f"🎉 Done. Deploy folder: {DB_PATH}")
-
-
-if __name__ == "__main__":
-    main()
+    return len(splits)
