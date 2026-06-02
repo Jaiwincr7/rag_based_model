@@ -1,6 +1,34 @@
 import re
 from mitre_store import get_vectorstore
 
+DESCRIPTION_MAX_LEN = 500
+
+
+def _extract_description(doc) -> str:
+    """Description from metadata or page_content."""
+    if doc.metadata.get("description"):
+        text = doc.metadata["description"].strip()
+    else:
+        match = re.search(
+            r"Description:\s*(.+?)(?:\n\s*Tactics:|\Z)",
+            doc.page_content,
+            re.DOTALL | re.IGNORECASE,
+        )
+        text = match.group(1).strip() if match else doc.page_content.strip()
+    if len(text) > DESCRIPTION_MAX_LEN:
+        text = text[:DESCRIPTION_MAX_LEN].rsplit(" ", 1)[0] + "..."
+    return text
+
+
+def _format_technique(doc, score=None) -> str:
+    mid = doc.metadata.get("mitre_id", "?")
+    name = doc.metadata.get("name", "Unknown")
+    desc = _extract_description(doc)
+    header = f"💀 [{mid}] {name}"
+    if score is not None:
+        header += f" (relevance: {score:.2f})"
+    return f"{header}\n   📖 {desc}"
+
 
 class IntentRouter:
     def __init__(self):
@@ -99,26 +127,56 @@ class IntentRouter:
         # ---------------------------------------------------------
         id_match = re.search(r"\b([TM]\d{4}(?:\.\d{3})?)\b", query.upper())
         if id_match:
-            results = self.vectorstore.similarity_search(query, k=1, filter={"mitre_id": id_match.group(1)})
+            results = self.vectorstore.similarity_search(
+                query, k=1, filter={"mitre_id": id_match.group(1)}
+            )
             if results:
-                return f"📄 {results[0].metadata.get('mitre_id')} - {results[0].metadata.get('name')}\n   {results[0].page_content[:200]}..."
+                return "📄 Technique details:\n\n" + _format_technique(results[0])
 
         # ---------------------------------------------------------
-        # DEFAULT: Semantic Search (Capping Update)
+        # Phishing / named-technique lookup (prefer name match + descriptions)
         # ---------------------------------------------------------
-        results = self.vectorstore.similarity_search_with_score(query, k=3, filter={"type": "attack-pattern"})
-        
-        # Filter out bad scores
-        good_matches = [
-            f"   💀 [{doc.metadata.get('mitre_id')}] {doc.metadata.get('name')}" 
-            for doc, score in results if score < self.CONFIDENCE_THRESHOLD
-        ]
-        
-        if not good_matches:
-            # Explicit Rejection
-            return "❌ No high-confidence matches found. Please specify a Tactic, ID, or valid Technique name."
-            
-        return "🔎 Semantic Matches:\n" + "\n".join(good_matches)
+        if "phishing" in q:
+            return self._semantic_with_descriptions(
+                query, extra_terms=["phishing"], k=5
+            )
+
+        # ---------------------------------------------------------
+        # DEFAULT: Semantic search with descriptions
+        # ---------------------------------------------------------
+        return self._semantic_with_descriptions(query, k=4)
+
+    def _semantic_with_descriptions(
+        self, query: str, k: int = 4, extra_terms: list | None = None
+    ) -> str:
+        results = self.vectorstore.similarity_search_with_score(
+            query, k=k * 3, filter={"type": "attack-pattern"}
+        )
+        q_lower = query.lower()
+        terms = set(re.findall(r"[a-z]{4,}", q_lower))
+        if extra_terms:
+            terms.update(extra_terms)
+
+        ranked: list[tuple] = []
+        for doc, score in results:
+            if score >= self.CONFIDENCE_THRESHOLD:
+                continue
+            name = (doc.metadata.get("name") or "").lower()
+            # Prefer techniques whose name contains query terms (e.g. "phishing")
+            name_boost = -0.15 if any(t in name for t in terms) else 0.0
+            ranked.append((score + name_boost, doc, score))
+
+        ranked.sort(key=lambda x: x[0])
+        ranked = ranked[:k]
+
+        if not ranked:
+            return (
+                "❌ No high-confidence matches found. "
+                "Try a MITRE ID (e.g. T1566) or a more specific technique name."
+            )
+
+        blocks = [_format_technique(doc, score=raw) for _, doc, raw in ranked]
+        return "🔎 MITRE ATT&CK matches:\n\n" + "\n\n".join(blocks)
 
 router = IntentRouter()
 
