@@ -220,8 +220,8 @@ def get_llm():
 def format_docs(docs):
     formatted = []
     for d in docs:
+        source = d.metadata.get("source") or d.metadata.get("url") or "OWASP"
         formatted.append(
-            f"[SOURCE: {d.metadata.get('source')}\n"
-            f"{d.page_content.strip()[:500]}"
+            f"[SOURCE: {source}]\n{d.page_content.strip()[:500]}"
         )
     return "\n\n".join(formatted)
