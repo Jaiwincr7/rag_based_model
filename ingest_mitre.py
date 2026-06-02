@@ -77,11 +77,11 @@ def main():
             "mitre_id": data["mitre_id"],
             "name": data["name"],
             "type": obj_type,
+            "description": (data["description"] or "")[:3000],
             "tactics": "|||".join(data["tactics"]),
-            "linked_mitigations": "|||".join(tech_mitigated_by.get(stix_id, [])), 
+            "linked_mitigations": "|||".join(tech_mitigated_by.get(stix_id, [])),
             "linked_techniques": "|||".join(mitigation_targets.get(stix_id, [])),
-            # Store full detection text in metadata for easy retrieval
-            "detection_blob": data["detection"] 
+            "detection_blob": data["detection"],
         }
 
         content = f"""
