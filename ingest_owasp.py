@@ -1,7 +1,8 @@
 """
-Ingest OWASP Top 10 2021 from GitHub markdown (stable; owasp.org often returns redirect HTML).
-Run locally, then deploy ./chroma_db/owasp to Render.
+Ingest OWASP Top 10 2021 from GitHub English markdown.
+Run locally, then deploy ./chroma_db/owasp to Render:
 
+  pip install requests sentence-transformers langchain-community chromadb langchain-text-splitters
   python ingest_owasp.py
 """
 
@@ -16,10 +17,9 @@ from langchain_core.documents import Document
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 GITHUB_RAW_BASE = (
-    "https://raw.githubusercontent.com/OWASP/Top10/master/2021/docs"
+    "https://raw.githubusercontent.com/OWASP/Top10/master/2021/docs/en"
 )
 
-# Filenames match OWASP/Top10 repo (2021/docs/)
 OWASP_MARKDOWN_FILES = [
     "index.md",
     "A00_2021_Introduction.md",
@@ -40,7 +40,6 @@ DB_PATH = "./chroma_db/owasp"
 
 
 def is_useful_content(text: str) -> bool:
-    """Drop redirect stubs and near-empty pages."""
     cleaned = text.strip()
     if len(cleaned) < 200:
         return False
@@ -54,24 +53,24 @@ def is_useful_content(text: str) -> bool:
 
 def load_markdown_doc(filename: str) -> Document | None:
     url = f"{GITHUB_RAW_BASE}/{filename}"
-    print(f"  fetching {url}")
+    print(f"  fetching {filename} ...")
     resp = requests.get(url, timeout=60)
     if resp.status_code == 404:
-        print(f"  ⚠️  not found: {filename}")
+        print(f"  ⚠️  404: {filename}")
         return None
     resp.raise_for_status()
     text = resp.text
     if not is_useful_content(text):
-        print(f"  ⚠️  skipped low-quality content: {filename}")
+        print(f"  ⚠️  skipped low-quality: {filename}")
         return None
     return Document(
         page_content=text,
-        metadata={"source": f"OWASP/{filename}", "url": url},
+        metadata={"source": f"OWASP/en/{filename}", "url": url},
     )
 
 
 def main():
-    print("📥 Loading OWASP Top 10 2021 from GitHub markdown...")
+    print("📥 Loading OWASP Top 10 2021 (GitHub en/)...")
     docs: list[Document] = []
     for filename in OWASP_MARKDOWN_FILES:
         doc = load_markdown_doc(filename)
@@ -79,11 +78,12 @@ def main():
             docs.append(doc)
 
     if not docs:
-        print("❌ No documents loaded. Check network or filenames.")
+        print("❌ No documents loaded. Check internet or filenames.")
         sys.exit(1)
 
     print(f"✅ Loaded {len(docs)} documents.")
-    print(f"🔎 Sample: {docs[0].page_content[:200].replace(chr(10), ' ')}...")
+    sample = docs[0].page_content[:180].replace("\n", " ")
+    print(f"🔎 Sample: {sample}...")
 
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=1000,
@@ -98,24 +98,24 @@ def main():
 
     print(f"✅ Created {len(splits)} chunks.")
 
-    print(f"⏳ Embedding with {EMBEDDING_MODEL}...")
+    print(f"⏳ Embedding ({EMBEDDING_MODEL}) — first run downloads the model...")
     embeddings = HuggingFaceEmbeddings(model_name=EMBEDDING_MODEL)
 
     if os.path.exists(DB_PATH):
         try:
             shutil.rmtree(DB_PATH)
-            print(f"🧹 Removed old database at {DB_PATH}")
+            print(f"🧹 Removed old DB at {DB_PATH}")
         except PermissionError:
             print("⚠️  Close apps using chroma_db, then rerun.")
 
-    print("💾 Saving to ChromaDB...")
+    print("💾 Writing ChromaDB...")
     Chroma.from_documents(
         documents=splits,
         embedding=embeddings,
         collection_name="owasp",
         persist_directory=DB_PATH,
     )
-    print(f"🎉 SUCCESS: {DB_PATH} ready. Commit and deploy chroma_db/owasp to Render.")
+    print(f"🎉 Done. Deploy folder: {DB_PATH}")
 
 
 if __name__ == "__main__":
