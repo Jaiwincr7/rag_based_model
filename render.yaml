@@ -17,7 +17,7 @@ services:
       - key: USE_EXTRACTIVE_ONLY
         value: "false"
       - key: MODEL_NAME
-        value: TinyLlama/TinyLlama-1.1B-Chat-v1.0
+        value: Qwen/Qwen2.5-0.5B-Instruct
       - key: OWASP_EMBEDDING_MODEL
         value: sentence-transformers/all-MiniLM-L6-v2
       - key: MITRE_EMBEDDING_MODEL
