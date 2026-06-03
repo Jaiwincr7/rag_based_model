@@ -49,42 +49,47 @@ class IntentRouter:
         return doc
 
     def is_mitre_related(self, query: str) -> bool:
-        q = query.upper()
+        q = query.lower()
 
-        if re.search(r"\bT\d{4}(?:\.\d{3})?\b", q):
+        # Technique IDs
+        if re.search(r"\bt\d{4}(?:\.\d{3})?\b", q):
             return True
 
-        if re.search(r"\bM\d{4}\b", q):
+        # Mitigation IDs
+        if re.search(r"\bm\d{4}\b", q):
             return True
 
-        try:
-            attack_results = self.vectorstore.similarity_search_with_score(
-                query,
-                k=1,
-                filter={"type": "attack-pattern"}
-            )
+        mitre_terms = [
+            "mitre",
+            "att&ck",
+            "attack technique",
+            "technique",
+            "sub-technique",
+            "tactic",
+            "mitigation",
+            "credential access",
+            "initial access",
+            "execution",
+            "persistence",
+            "privilege escalation",
+            "defense evasion",
+            "discovery",
+            "lateral movement",
+            "collection",
+            "command and control",
+            "exfiltration",
+            "impact",
+            "keylogging",
+            "credential dumping",
+            "input capture",
+            "lsass",
+            "phishing"
+        ]
 
-            mitigation_results = self.vectorstore.similarity_search_with_score(
-                query,
-                k=1,
-                filter={"type": "course-of-action"}
-            )
+        if any(term in q for term in mitre_terms):
+            return True
 
-            scores = []
-
-            if attack_results:
-                scores.append(attack_results[0][1])
-
-            if mitigation_results:
-                scores.append(mitigation_results[0][1])
-
-            if not scores:
-                return False
-
-            return min(scores) <= self.CONFIDENCE_THRESHOLD
-
-        except Exception:
-            return False
+        return False
 
     def mitre_only_message(self) -> str:
         return (
