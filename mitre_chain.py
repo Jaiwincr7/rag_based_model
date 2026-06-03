@@ -34,7 +34,7 @@ class IntentRouter:
     def __init__(self):
         # Strict Cutoff: 1.2 (Lower is better in Chroma/L2)
         # Any semantic match worse than this is ignored unless explicitly requested.
-        self.CONFIDENCE_THRESHOLD = 1
+        self.CONFIDENCE_THRESHOLD = 1.2
 
     @property
     def vectorstore(self):
@@ -48,7 +48,59 @@ class IntentRouter:
         if score > self.CONFIDENCE_THRESHOLD: return None
         return doc
 
+    def is_mitre_related(self, query: str) -> bool:
+        q = query.upper()
+
+        if re.search(r"\bT\d{4}(?:\.\d{3})?\b", q):
+            return True
+
+        if re.search(r"\bM\d{4}\b", q):
+            return True
+
+        try:
+            attack_results = self.vectorstore.similarity_search_with_score(
+                query,
+                k=1,
+                filter={"type": "attack-pattern"}
+            )
+
+            mitigation_results = self.vectorstore.similarity_search_with_score(
+                query,
+                k=1,
+                filter={"type": "course-of-action"}
+            )
+
+            scores = []
+
+            if attack_results:
+                scores.append(attack_results[0][1])
+
+            if mitigation_results:
+                scores.append(mitigation_results[0][1])
+
+            if not scores:
+                return False
+
+            return min(scores) <= self.CONFIDENCE_THRESHOLD
+
+        except Exception:
+            return False
+
+    def mitre_only_message(self) -> str:
+        return (
+            "⚠️ This chatbot only answers MITRE ATT&CK related questions.\n\n"
+            "Examples:\n"
+            "• T1566\n"
+            "• T1056.001\n"
+            "• Defenses for Keylogging\n"
+            "• Techniques mitigated by M1043\n"
+            "• List techniques under Credential Access\n"
+            "• Explain OS Credential Dumping"
+        )
     def solve(self, query):
+        if not self.is_mitre_related(query):
+            return self.mitre_only_message()
+
         q = query.lower()
 
         # ---------------------------------------------------------
